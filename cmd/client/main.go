@@ -35,15 +35,16 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/pkg/errors"
+	"github.com/prometheus-community/pushprox/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/prometheus/common/promlog"
 	"github.com/prometheus/common/promlog/flag"
-	"github.com/prometheus-community/pushprox/util"
 )
 
 var (
 	myFqdn      = kingpin.Flag("fqdn", "FQDN to register with").Default(fqdn.Get()).String()
+	jobName     = kingpin.Flag("job-name", "Job name to return in client list").Required().String()
 	proxyURL    = kingpin.Flag("proxy-url", "Push proxy to talk to.").Required().String()
 	caCertFile  = kingpin.Flag("tls.cacert", "<file> CA certificate to verify peer against").String()
 	tlsCert     = kingpin.Flag("tls.cert", "<cert> Client certificate file").String()
@@ -180,7 +181,7 @@ func loop(c Coordinator, client *http.Client) error {
 		return errors.Wrap(err, "error parsing url poll")
 	}
 	url := base.ResolveReference(u)
-	resp, err := client.Post(url.String(), "", strings.NewReader(*myFqdn))
+	resp, err := client.Post(url.String(), "", strings.NewReader(join(*jobName, "|", *myFqdn)))
 	if err != nil {
 		level.Error(c.logger).Log("msg", "Error polling:", "err", err)
 		return errors.Wrap(err, "error polling")
@@ -309,4 +310,12 @@ func main() {
 			continue
 		}
 	}
+}
+
+func join(strs ...string) string {
+	var ret string
+	for _, str := range strs {
+		ret += str
+	}
+	return ret
 }

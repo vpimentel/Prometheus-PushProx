@@ -25,9 +25,9 @@ import (
 	"github.com/go-kit/kit/log"
 	"github.com/go-kit/kit/log/level"
 	"github.com/google/uuid"
+	"github.com/prometheus-community/pushprox/util"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prometheus-community/pushprox/util"
 )
 
 var (
@@ -56,6 +56,9 @@ type Coordinator struct {
 	// Clients we know about and when they last contacted us.
 	known map[string]time.Time
 
+	// Clients associated jobs names.
+	jobName map[string]string
+
 	logger log.Logger
 }
 
@@ -64,6 +67,7 @@ func NewCoordinator(logger log.Logger) (*Coordinator, error) {
 	c := &Coordinator{
 		waiting:   map[string]chan *http.Request{},
 		responses: map[string]chan *http.Response{},
+		jobName:   map[string]string{},
 		known:     map[string]time.Time{},
 		logger:    logger,
 	}
@@ -133,10 +137,10 @@ func (c *Coordinator) DoScrape(ctx context.Context, r *http.Request) (*http.Resp
 }
 
 // WaitForScrapeInstruction registers a client waiting for a scrape result
-func (c *Coordinator) WaitForScrapeInstruction(fqdn string) (*http.Request, error) {
+func (c *Coordinator) WaitForScrapeInstruction(jobName string, fqdn string) (*http.Request, error) {
 	level.Info(c.logger).Log("msg", "WaitForScrapeInstruction", "fqdn", fqdn)
 
-	c.addKnownClient(fqdn)
+	c.addKnownClient(jobName, fqdn)
 	// TODO: What if the client times out?
 	ch := c.getRequestChannel(fqdn)
 
@@ -181,12 +185,14 @@ func (c *Coordinator) ScrapeResult(r *http.Response) error {
 	}
 }
 
-func (c *Coordinator) addKnownClient(fqdn string) {
+func (c *Coordinator) addKnownClient(jobName string, fqdn string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.known[fqdn] = time.Now()
 	knownClients.Set(float64(len(c.known)))
+
+	c.jobName[fqdn] = jobName
 }
 
 // KnownClients returns a list of alive clients
@@ -202,6 +208,13 @@ func (c *Coordinator) KnownClients() []string {
 		}
 	}
 	return known
+}
+
+func (c *Coordinator) KnownJobNames() map[string]string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.jobName
 }
 
 // Garbagee collect old clients.

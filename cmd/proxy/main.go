@@ -149,8 +149,12 @@ func (h *httpHandler) handlePush(w http.ResponseWriter, r *http.Request) {
 
 // handlePoll handles clients registering and asking for scrapes.
 func (h *httpHandler) handlePoll(w http.ResponseWriter, r *http.Request) {
-	fqdn, _ := ioutil.ReadAll(r.Body)
-	request, err := h.coordinator.WaitForScrapeInstruction(strings.TrimSpace(string(fqdn)))
+	clientIdentificationRaw, _ := ioutil.ReadAll(r.Body)
+	clientIdentification := strings.Split(strings.TrimSpace(string(clientIdentificationRaw)), "|")
+
+	fqdn := clientIdentification[1]
+	jobName := clientIdentification[0]
+	request, err := h.coordinator.WaitForScrapeInstruction(jobName, fqdn)
 	if err != nil {
 		level.Info(h.logger).Log("msg", "Error WaitForScrapeInstruction:", "err", err)
 		http.Error(w, fmt.Sprintf("Error WaitForScrapeInstruction: %s", err.Error()), 408)
@@ -163,9 +167,10 @@ func (h *httpHandler) handlePoll(w http.ResponseWriter, r *http.Request) {
 // handleListClients handles requests to list available clients as a JSON array.
 func (h *httpHandler) handleListClients(w http.ResponseWriter, r *http.Request) {
 	known := h.coordinator.KnownClients()
+	jobName := h.coordinator.KnownJobNames()
 	targets := make([]*targetGroup, 0, len(known))
 	for _, k := range known {
-		targets = append(targets, &targetGroup{Targets: []string{k}})
+		targets = append(targets, &targetGroup{Targets: []string{k}, Labels: map[string]string{"job": jobName[k]}})
 	}
 	json.NewEncoder(w).Encode(targets)
 	level.Info(h.logger).Log("msg", "Responded to /clients", "client_count", len(known))
@@ -212,7 +217,7 @@ func main() {
 	mux := http.NewServeMux()
 	handler := newHTTPHandler(logger, coordinator, mux)
 
-	level.Info(logger).Log("msg", "Listening", "address", *baseContextPath, *listenAddress)
+	level.Info(logger).Log("msg", "Listening", "baseContext", *baseContextPath, "address", *listenAddress)
 	if err := http.ListenAndServe(*listenAddress, handler); err != nil {
 		level.Error(logger).Log("msg", "Listening failed", "err", err)
 		os.Exit(1)
